@@ -1,0 +1,136 @@
+pipeline {
+    agent any
+
+    tools {
+        maven 'maven3'
+    }
+    
+    environment {
+        SCANNER_HOME = tool 'sonar-scanner'
+        
+    }
+    
+    stages {
+        stage('Git Checkout') {
+            steps {
+                git branch: 'main', url: 'https://github.com/mob50/FullStack-Blogging-App.git'
+            }
+        }
+        stage('Compile') {
+            steps {
+                sh "mvn compile"
+            }
+        }
+        stage('Test') {
+            steps {
+                sh 'mvn test'
+            }
+        }
+        stage('Trivy FS Scan') {
+            steps {
+                sh 'trivy fs --format table -o fs.html .'
+            }
+        }
+        stage('SonarQube Analysis') {
+            steps {
+                
+                
+                withSonarQubeEnv('sonar-server') {
+                   sh '''$SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=Blogging-app -Dsonar.projectKey=Blogging-app \
+                         -Dsonar.java.binaries=target '''
+    
+                    
+                }
+                
+            }
+  
+        }
+   
+        
+         stage('Build') {
+            steps {
+                sh 'mvn package'
+            }
+        }
+        
+         stage('Publish Artifact') {
+            steps {
+                withMaven(globalMavenSettingsConfig: 'maven-settings', jdk: 'jdk17', maven: 'maven3', mavenSettingsConfig: '', traceability: true) {
+                     sh 'mvn deploy'
+}
+            }
+        }
+        
+       
+        stage('Docker Build and Tag') {
+            steps {
+               script{
+               withDockerRegistry(credentialsId: '7e6fca9b-364d-4668-8fc0-f763483bcb03') {
+                
+                sh 'docker build -t vkedar/bloggingapp:latest .'           
+                   
+               }}
+               
+            }
+        }
+        
+        
+        
+           stage('Trivy Image Scan') {
+            steps {
+                sh 'trivy image --format table -o image.html vkedar/bloggingapp:latest'
+            }
+        }
+        
+        
+        
+        
+        stage('Docker Push IMAGE') {
+            steps {
+               script{
+               withDockerRegistry(credentialsId: '7e6fca9b-364d-4668-8fc0-f763483bcb03') {
+                
+                sh 'docker push vkedar/bloggingapp:latest'           
+                   
+               }}
+               
+            }
+        }
+        
+        
+        
+        
+           stage('k8s deploy') {
+            steps {
+               
+               withKubeConfig(caCertificate: '', clusterName: 'devopsshack-cluster', contextName: '', credentialsId: 'k8s-cred', namespace: 'webapps', restrictKubeConfigAccess: false, serverUrl: 'https://8C0A435D8E2F95F1B6C3569C99AB8046.gr7.ap-south-1.eks.amazonaws.com') {
+                  sh 'kubectl apply -f deployment-service.yml -n webapps'
+   
+                   sleep 20
+               }
+               
+               
+            }
+        }
+        
+        
+           stage('verify deploy') {
+            steps {
+               
+               withKubeConfig(caCertificate: '', clusterName: 'devopsshack-cluster', contextName: '', credentialsId: 'k8s-cred', namespace: 'webapps', restrictKubeConfigAccess: false, serverUrl: 'https://8C0A435D8E2F95F1B6C3569C99AB8046.gr7.ap-south-1.eks.amazonaws.com') {
+                  sh 'kubectl get pods -n webapps'
+                  sh 'kubectl get svc -n webapps'
+   
+                   
+               }
+               
+               
+            }
+        }
+        
+        
+     
+        
+    }
+   
+}
